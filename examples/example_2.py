@@ -1,3 +1,8 @@
+"""
+Implementation of Multi-Level Feed Forward Network. 
+Get the Module at: https://github.com/thevaishnav/RecurrentTreeNet
+Made by Vaishnav Chincholkar
+"""
 from network import *
 
 
