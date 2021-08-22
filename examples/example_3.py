@@ -1,3 +1,9 @@
+"""
+Implementation of Multi-Level Recurrent Neural Network. 
+Get the Module at: https://github.com/thevaishnav/RecurrentTreeNet
+Made by Vaishnav Chincholkar
+"""
+
 from network import *
 
 
