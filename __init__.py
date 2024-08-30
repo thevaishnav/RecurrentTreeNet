@@ -1,4 +1,4 @@
 """
 Created by Vaishnav Chincholkar
-https://github.com/thevaishnav/RecurrentTreeNet
+https://github.com/thevaishnav/CustomFrameworkForNeuralNetworks
 """
