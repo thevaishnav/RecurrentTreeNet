@@ -21,8 +21,7 @@ class Edge:
         if from_layer.network == to_layer.network:
             self.network = from_layer.network
         else:
-            raise LayerParentError(
-                f"The given layers {from_layer.title} and {to_layer.title} are from different network.")
+            raise LayerParentError(f"The given layers {from_layer.title} and {to_layer.title} are from different network.")
         if (type(delay_iterations) is not int) or (delay_iterations < 0):
             raise ValueError("Delay Iterations (delay_iterations) must be an positive integer or zero.")
         if optimizer and (not issubclass(type(optimizer), Optimizer)):

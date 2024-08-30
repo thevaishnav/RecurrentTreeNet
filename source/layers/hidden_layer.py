@@ -24,7 +24,5 @@ class HiddenLayer(Layer):
         self.SB = np.zeros((1, self._nerve_count))
 
     def test(self) -> None:
-        if len(self._input_socket) == 0: raise IsolatedLayerError(
-            f"Layer \"{self.title}\" has no connections at Input.")
-        if len(self._output_socket) == 0: raise IsolatedLayerError(
-            f"Layer \"{self.title}\" has no connections at Output.")
+        if len(self._input_socket) == 0: raise IsolatedLayerError(f"Layer \"{self.title}\" has no connections at Input.")
+        if len(self._output_socket) == 0: raise IsolatedLayerError(f"Layer \"{self.title}\" has no connections at Output.")

@@ -86,5 +86,5 @@ class Layer:
         for edge in self._input_socket:
             edge.update_weights(lr)
 
-    def test(self) -> None:
+    def test(self) -> int:
         raise NotImplementedError()

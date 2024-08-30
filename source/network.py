@@ -2,13 +2,13 @@ from .edge import Edge
 from .loss import Loss
 import numpy as np
 
-from source.exceptions import LoopError
 from source.layers.base_layer import Layer
-from source.layers.hidden_layer import HiddenLayer
 from source.layers.input_layer import InputLayer
 from source.layers.output_layer import OutputLayer
 from source.optimizers.base_optimizer import Optimizer
 from source.optimizers.stochastic_gradient_descent import OptimSGD
+from source.compilation import loop_detection, get_execution_order
+from source.exceptions import LoopError
 
 
 class InputScaler:
@@ -48,6 +48,9 @@ class Network:
         self._hidden_layers = set()
         self._current_batch_no = None
         self._input_scalar = InputScaler()
+        self._is_stopped_during_training = False
+        self._eo_forward: list[Layer] = None        # Execution Order for Forward Pass, None if the model is not compiled
+        self._eo_backward: list[Layer] = None       # Execution Order for Backward Pass, None if the model is not compiled
 
     @property
     def current_batch_no(self):
@@ -61,6 +64,10 @@ class Network:
     def layer_count(self) -> int:
         return len(self._hidden_layers) + 1
 
+    def halt_training(self):
+        self._is_stopped_during_training = True
+        print("halt_training is called, Model will not be trained any further.")
+
     def add_layer(self, layer: Layer) -> None:
         """Internal method: Used by any instance of Layer class to declare its presence for network"""
         if type(layer) is InputLayer:
@@ -69,41 +76,6 @@ class Network:
             self._output_layer = layer
         else:
             self._hidden_layers.add(layer)
-
-    def _get_order_of_operations(self, reversed=True):
-        """
-        Internal function:
-        Implementation of Depth First Search Algorithm with layers as node.
-        Returns order in which layers should be called.
-        If Reversed = True, then returns order for back-propagation.
-        Else returns order for forward propagation.
-        """
-        ooo = []
-
-        reqs = {}
-        for lyr in self._hidden_layers:
-            lyr.test()
-            rs = set()
-            sockets = lyr._output_socket if reversed else lyr._input_socket
-            for edge in sockets:
-                if edge.delay_iterations >= 1: continue
-                ol = edge.get_other_layer(lyr)
-                if type(ol) is HiddenLayer: rs.add(ol)
-            reqs[lyr.id] = rs
-
-        layers = list(self._hidden_layers)
-        count = 0
-        while layers:
-            for lyr in layers:
-                for req_lyr in reqs[lyr.id]:
-                    if req_lyr not in ooo: break
-                else:  # Else to a for loop is called when break is called inside for loop
-                    ooo.append(lyr)
-                    layers.remove(lyr)
-            if count == len(self._hidden_layers):
-                raise LoopError("Given network has infinite data loop.")
-            count += 1
-        return ooo
 
     def _test_validity(self, first_input, first_output):
         """Internal Function. Check if the network is valid or not"""
@@ -115,31 +87,56 @@ class Network:
         if self._output_layer.nerve_count != op: raise ValueError(
             f"The given data contains invalid number of output parameters ({op}), Expected: {self._output_layer.nerve_count}")
 
-    def _fit_batch(self, X: np.array, Y: np.array, lr, forw_ooo: list, back_ooo: list):
+    def _fit_batch(self, X: np.array, Y: np.array, lr):
         """Internal function: Backprop for single batch"""
         # Forward pass
         self._input_layer._nuerv_acts = X
-        for layer in forw_ooo:
+        for layer in self._eo_forward:
             layer.feed_forward()
         self._output_layer.feed_forward()
 
         # Backward Pass
         self._output_layer.calc_delta(lr=lr, Y=Y)
-        for layer in back_ooo:
+        for layer in self._eo_backward:
             layer.calc_delta(lr)
 
         self._output_layer.update_weights(lr=lr)
-        for layer in back_ooo:
+        for layer in self._eo_backward:
             layer.update_weights(lr)
+
+    def compile(self):
+        """
+        Compiles this models, i.e. decides the execution order for the forward and backward pass.
+        The prediction and training will be done based on compiled model,
+        therefore the model must be compiled everytime connections between layers, or neuron counts in any layer changes.
+        You can however, change activation function and optimizers without having to re-compile.
+        """
+        # Check for Isolated Layers
+        for layer in self._hidden_layers:
+            layer.test()
+
+        # Check for infinite loops
+        loop_entry = loop_detection(self._hidden_layers)
+        if loop_entry is not None:
+            raise LoopError(f"Found infinite loop in the connections. Entry Point: {loop_entry.title}")
+
+        self._eo_forward = get_execution_order(self._hidden_layers, False)
+        self._eo_backward = get_execution_order(self._hidden_layers, True)
 
     def predict(self, inputs: np.array) -> np.array:
         """
+        MUST COMPILE THE NETWORK BEFORE RUNNING PREDICT FUNCTION
         Predicts the output for given input
         :return: prediction.
         """
-        if self._input_scalar.is_active: inputs = self._input_scalar.scale(inputs)
+        if self._eo_forward is None:
+            raise BrokenPipeError("Must compile the model (.compile function) before predict.")
+
+        if self._input_scalar.is_active:
+            inputs = self._input_scalar.scale(inputs)
+
         self._input_layer._nuerv_acts = inputs
-        for layer in self._get_order_of_operations(False):
+        for layer in self._eo_forward:
             layer.feed_forward()
         self._output_layer.feed_forward()
         return self._output_layer._nuerv_acts
@@ -156,6 +153,7 @@ class Network:
             validation_ratio: float = 0.2
             ):
         """
+        MUST COMPILE THE NETWORK BEFORE RUNNING FIT FUNCTION
         Train network on given training data trinX :param trainX: and :param trainY:
         :param mini_batch_size: Training will be done in small batches
         :param epoch: Number of epochs
@@ -163,22 +161,27 @@ class Network:
         :param shuffle: Whether to shuffle data after every epoch
         :param epoch_complete_call: What function to call after completion of every epoch.
         :param batch_complete_call: What functions to call after completion of every mini-batch
-        :param validation_ratio: fraction of training data which will be used for validation. (between 0 to 1, endpoints excluded)
+        :param validation_ratio: fraction of training data which will be used for validation. (between 0 & 1, endpoints excluded)
         :return: None
         """
+        if self._eo_forward is None or self._eo_backward is None:
+            raise BrokenPipeError("Must compile the model (.compile function) before predict.")
+
         trainX = self._input_scalar.set_params(trainX)
         training_data = list(zip(trainX, trainY))
         self._batch_size = mini_batch_size
         self._test_validity(trainX[0], trainY[0])
-        forw_ooo = self._get_order_of_operations(False)
-        back_ooo = self._get_order_of_operations(True)
         data_size = len(training_data)
 
         len_validation = int(len(training_data) * validation_ratio)
         validation_data = training_data[:len_validation]
         training_data = training_data[len_validation:]
         for epoch in range(epoch):
-            if shuffle: np.random.shuffle(training_data)
+            if self._is_stopped_during_training:
+                break
+            if shuffle:
+                np.random.shuffle(training_data)
+
             trainX, trainY = zip(*training_data)
             mini_batches = [[trainX[k - mini_batch_size:k], trainY[k - mini_batch_size:k]]
                             for k in range(mini_batch_size, data_size, mini_batch_size)]
@@ -186,12 +189,12 @@ class Network:
             for miniX, miniY in mini_batches:
                 if (not miniX) or (not miniY): continue
                 miniX, miniY = np.array(miniX), np.array(miniY)
-                self._fit_batch(miniX, miniY, lr, forw_ooo, back_ooo)
+                self._fit_batch(miniX, miniY, lr)
                 if batch_complete_call:
-                    batch_complete_call(self._current_batch_no, self.get_validation_error(validation_data, forw_ooo))
+                    batch_complete_call(self._current_batch_no, self.get_validation_error(validation_data))
                 self._current_batch_no += 1
             if epoch_complete_call is not None:
-                epoch_complete_call(epoch, self.get_validation_error(validation_data, forw_ooo))
+                epoch_complete_call(epoch, self.get_validation_error(validation_data))
         self._current_batch_no = -1
         self._batch_size = -1
 
@@ -219,7 +222,7 @@ class Network:
         for l1, l2 in zip(layers[:-1], layers[1:]):
             Edge(l1, l2)
 
-    def get_validation_error(self, validation_data, forw_ooo):
+    def get_validation_error(self, validation_data):
         """
         Internal Function.
         :return: Root Mean Squared loss
@@ -231,7 +234,7 @@ class Network:
 
         # Feed Forward
         self._input_layer._nuerv_acts = validX
-        for layer in forw_ooo:
+        for layer in self._eo_forward:
             layer.feed_forward()
         self._output_layer.feed_forward()
         delta = self._output_layer._nuerv_acts - validY
