@@ -1,66 +1,99 @@
-
 """
 Implementation of Simple Feed Forward Network.
 Get the Module at: https://github.com/thevaishnav/RecurrentTreeNet
 Made by Vaishnav Chincholkar
 """
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder
+from source import *
+import pickle
 
-from network import *
 
+def load_data():
+    print("Loading Data", end="")
+    # Load the mnist training data provided by Google Collab
+    train_set = pd.read_csv("mnist_test.csv", header=None)
+    X_train = train_set.iloc[:, 1:].values
+    Y_train = train_set.iloc[:, 0].values
 
-def mnist_data():
-    from torchvision import datasets
+    # Load the mnist test data provided by Google Collab
+    test_set = pd.read_csv("mnist_test.csv", header=None)
+    X_test = test_set.iloc[:, 1:].values
+    Y_test = test_set.iloc[:, 0].values
 
-    train_set = datasets.MNIST(r'E:\\Projects\\Pycharm\\AI\\backpropogation\\data', train=True, download=True)
-    test_set = datasets.MNIST(r'E:\\Projects\\Pycharm\\AI\\backpropogation\\data', train=False, download=True)
+    # Prepare the data
+    encoder = OneHotEncoder(categories='auto', sparse_output=False)
 
-    trainX = train_set.data.numpy().reshape((60000, 784))
-    trainY1 = train_set.train_labels.numpy()
-    testX = test_set.data.numpy().reshape((10000, 784))
-    testY1 = test_set.test_labels.data.numpy()
+    Y_train = Y_train.reshape(-1, 1)  # required for OneHotEncoder
+    Y_train = encoder.fit_transform(Y_train)
 
-    vals = {0: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            1: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-            2: [0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-            3: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
-            4: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-            5: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
-            6: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-            7: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
-            8: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-            9: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            }
-    testY = np.array([vals[val] for val in testY1])
-    trainY = np.array([vals[val] for val in trainY1])
-    return testX, testY, trainX, trainY
+    Y_test = Y_test.reshape(-1, 1)  # required for OneHotEncoder
+    Y_test = encoder.transform(Y_test)
+    print("- Done")
+    return X_train, Y_train, X_test, Y_test
 
 
 def check_accuracy(epoch, error):
-    true_cnt = 0
-    first_image = test_imgs
-    A3 = net.predict(first_image)
-    lfi = len(first_image)
-    for i in range(lfi):
-        pred = (np.round(A3[i], 3)).tolist()
-        original = test_labs[i].tolist().index(1)
-        prediction = pred.index(max(pred))
-        if prediction == original: true_cnt += 1
-
-    print(f"Epoch {epoch}: Predicted {true_cnt} correctly out of {lfi} ({error} error on validation)")
+    """
+    Checks the accuracy of the model (number of correct predictions / total number of samples) on the test dataset
+    This function will be called after each epoch to ensure that the model is not over-fitting
+    """
+    predictions = model.predict(X_test)
+    predicted_labels = np.argmax(predictions, axis=1)
+    true_labels = np.argmax(Y_test, axis=1)
+    accuracy = np.mean(predicted_labels == true_labels)
+    print(f"Accuracy: {accuracy * 100:.2f}%")
 
 
-test_imgs, test_labs, trainX, trainY = mnist_data()
-net = Network(OptimAdam())              # Every edge and layer will use This optimizer by default.
-IL = InputLayer(net, 784, title="IL")
-HL1 = HiddenLayer(net, 32, title="HL1", optimizer=OptimRMPProp())  # Only this layer will have RMS Prop optimizer, others will is Adam
-HL2 = HiddenLayer(net, 32, title="HL2")
-OL = OutputLayer(net, 10, title="OL")
+def create_model():
+    print("Creating Model", end="")
+    # Create the Neural Network and Layers
+    model = Network(OptimRMPProp())  # Every edge and layer will use This optimizer by default.
+    IL = InputLayer(model, 784, title="IL")
+    HL1 = HiddenLayer(model, 32, title="HL1", _act_fun=ActLReLU(), optimizer=OptimAdam())
+    HL2 = HiddenLayer(model, 32, title="HL2", _act_fun=ActLReLU())
+    OL = OutputLayer(model, 10, title="OL", _act_fun=ActSoftmax())
 
-net.linear_connect(IL, HL1, HL2, OL)
-"""
-net.linear_connect(IL, HL1, HL2, OL) is equivalent to:
-    Edge(IL, HL1, optimizer=None, delay_iterations=0)
-    Edge(HL1, HL2, optimizer=None, delay_iterations=0)
-    Edge(HL2, OL, optimizer=None, delay_iterations=0)
-"""
-net.fit(trainX, trainY, 100, 1, epoch_complete_call=check_accuracy)
+    # Connect the layers
+    model.linear_connect(IL, HL1, HL2, OL)
+    """
+    model.linear_connect(IL, HL1, HL2, OL) is equivalent to connecting these layers in a Linear Feed Forward Neural Network:
+    IL -> HL1 -> HL2 -> OL
+    """
+
+    # Necessary step, Validates the connections, and
+    # Decides execution order for Forward Pass and Backward Pass
+    model.compile()
+    print("- Done")
+    return model
+
+
+def train_and_save_model():
+    # Train the model and save data to a file
+    print("Training Model")
+    model.fit(X_train, Y_train, 100, 10, epoch_complete_call=check_accuracy)
+
+    print()
+    print("Saving Model", end="")
+    with open("example_1_trained.bin", 'wb') as f:
+        model_data = model.serialize()
+        pickle.dump(model_data, f)
+    print("- Done. Saved to: \"example_1_trained.bin\" file")
+
+
+def load_and_test_mode():
+    print("Loading Model", end="")
+    with open("example_1_trained.bin", 'rb') as f:
+        model_data = pickle.load(f)
+        model.deserialize(model_data)
+        print("- Done")
+
+    print("Testing Model")
+    check_accuracy(1, 0)
+
+
+X_train, Y_train, X_test, Y_test = load_data()
+model = create_model()
+# train_and_save_model()
+load_and_test_mode()

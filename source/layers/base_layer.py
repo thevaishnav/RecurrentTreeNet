@@ -88,3 +88,20 @@ class Layer:
 
     def test(self) -> int:
         raise NotImplementedError()
+
+    def serialize(self) -> dict[str, object]:
+        params = {"biases": self._biases}
+
+        for edge in self._input_socket:
+            edge_title = edge.title
+            params[edge_title] = edge._weights
+        return params
+
+    def deserialize(self, data: dict[str, object]):
+        if "biases" in data: self._biases = data["biases"]
+        else: print(f"Biases for layer \"{self.title}\" not found in the data")
+
+        for edge in self._input_socket:
+            edge_title = edge.title
+            if edge_title in data: edge._weights = data[edge_title]
+            else: print(f"Weights for edge {edge_title} not found in the data")

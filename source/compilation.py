@@ -1,4 +1,4 @@
-from source import Layer
+from source import Layer, HiddenLayer
 from source.exceptions import LoopError
 
 
@@ -61,24 +61,20 @@ def get_execution_order(layers: set[Layer], is_backward: bool) -> list[Layer]:
     :param is_backward: if True, returns order for backward pass, else returns order for forward pass.
     :return: (order for forward pass, order for backward pass)
     """
-    ooo = []
-    reqs = {}
-    for lyr in layers:
+    def is_satisfied(lyr: Layer):
         sockets = lyr._output_socket if is_backward else lyr._input_socket
-        reqs[lyr.id] = {edge.get_other_layer(lyr) for edge in sockets if edge.delay_iterations <= 0}
+        for edge in sockets:
+            if edge.delay_iterations <= 0:
+                other = edge.get_other_layer(lyr)
+                if type(other) is HiddenLayer and other not in ooo:
+                    return False
+        return True
 
-    layers = list(layers)
-    count = 0
-    while layers:
-        for lyr in layers:
-            for req_lyr in reqs[lyr.id]:
-                if req_lyr not in ooo:
-                    break
-            else:
-                ooo.append(lyr)
-                layers.remove(lyr)
-        if count == len(layers):
-            raise LoopError("Given network has infinite data loop.")
-        count += 1
+    ooo = []
+    layers_list = list(layers)
+    while len(layers_list) > 0:
+        for layer in filter(is_satisfied, layers_list):
+            ooo.append(layer)
+            layers_list.remove(layer)
     return ooo
 

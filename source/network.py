@@ -1,4 +1,5 @@
 from .edge import Edge
+from .input_scaler import InputScaler
 from .loss import Loss
 import numpy as np
 
@@ -9,31 +10,6 @@ from source.optimizers.base_optimizer import Optimizer
 from source.optimizers.stochastic_gradient_descent import OptimSGD
 from source.compilation import loop_detection, get_execution_order
 from source.exceptions import LoopError
-
-
-class InputScaler:
-    def __init__(self):
-        self._sig = None
-        self._mu = None
-        self._X = None
-        self._Y = None
-        self._validX = None
-        self._validY = None
-
-    @property
-    def is_active(self):
-        return self._sig is not None
-
-    def set_params(self, X: np.array):
-        self._mu = np.average(X, axis=0)
-        X_new = X - self._mu
-        self._sig = np.average(np.square(X), axis=0) + 0.01  # 0.01 is added so that division don`t return inf.
-        X_new /= self._sig
-        return X_new
-
-    def scale(self, data: np.array):
-        return (data - self._mu) / self._sig
-
 
 class Network:
     def __init__(self, optimizer: Optimizer = None):
@@ -111,8 +87,16 @@ class Network:
         therefore the model must be compiled everytime connections between layers, or neuron counts in any layer changes.
         You can however, change activation function and optimizers without having to re-compile.
         """
+
+        used_titles = set()
         # Check for Isolated Layers
         for layer in self._hidden_layers:
+            lower = layer.title.lower()
+            if lower in used_titles:
+                raise ValueError(f"Multiple layers with same title: \"{layer.title}\" (Case Insensitive)"
+                                 f"The layer titles will be used to uniquely identify each layer during serialization.")
+
+            used_titles.add(lower)
             layer.test()
 
         # Check for infinite loops
@@ -140,6 +124,28 @@ class Network:
             layer.feed_forward()
         self._output_layer.feed_forward()
         return self._output_layer._nuerv_acts
+
+    def serialize(self) -> dict[str, dict[str, object]]:
+        if self._eo_forward is None:
+            raise BrokenPipeError("Must compile the model (.compile function) before saving.")
+        d = {}
+        for layer in self._eo_forward:
+            d[layer.title.lower()] = layer.serialize()
+        d[self._output_layer.title.lower()] = self._output_layer.serialize()
+        return d
+
+    def deserialize(self, data: dict[str, dict[str, object]]):
+        def load_layer(lyr: Layer):
+            lower = lyr.title.lower()
+            if lower in data: lyr.deserialize(data[lower])
+            else: print(f"Data for layer \"{lyr.title}\" not found while loading. Check if the layers are titled correctly. Titles are case insensitive")
+
+        if self._eo_forward is None:
+            raise BrokenPipeError("Must compile the model (.compile function) before loading.")
+
+        for layer in self._eo_forward:
+            load_layer(layer)
+        load_layer(self._output_layer)
 
     def fit(self,
             trainX: np.array,

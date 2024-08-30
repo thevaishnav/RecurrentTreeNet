@@ -32,7 +32,6 @@ class Edge:
         self._delay_iterations = delay_iterations
         self._start.add_output(self)
         self._end.add_input(self)
-        self._savedW = []
         self._optimizer = optimizer or self.network.optimizer(self)
         self._optimizer.set_parent(self)
         self._optimizer.init_param()
@@ -41,6 +40,12 @@ class Edge:
     @property
     def optimizer(self):
         return self._optimizer
+
+    @property
+    def title(self):
+        start = self._start.title.replace("->", "")
+        end = self._end.title.replace("->", "")
+        return f"[{start}->{end}]"
 
     @property
     def delay_iterations(self):
@@ -64,12 +69,7 @@ class Edge:
                 "delay_iterations" iterations before this one.
                 If current iteration < delay_iterations, then random weights.
         """
-        itt = self.network.current_batch_no
-        if (self._delay_iterations == 0) or (itt == "test"):
-            return self._weights
-        elif len(self._savedW) < itt:
-            return np.random.randn(self._start.nerve_count, self._end.nerve_count)
-        return self._savedW[0]
+        return self._weights
 
     def get_other_layer(self, layer: Layer) -> Layer:
         return self._start if layer == self._end else self._end
@@ -77,10 +77,7 @@ class Edge:
     def update_weights(self, lr: float) -> None:
         """
         :param lr: learning rate
-        update weights and save them.
+        update weights.
         """
         deltaW = np.dot(self._start._nuerv_acts.T, self._end._delta)
         self._weights -= lr * self._optimizer.get_delta(deltaW)
-        if self._delay_iterations and len(self._savedW) == self._delay_iterations:
-            self._savedW.pop(0)
-        self._savedW.append(self._weights)

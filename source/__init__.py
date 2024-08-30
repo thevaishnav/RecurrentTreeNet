@@ -3,6 +3,7 @@ from .activations.composite import ActCompose
 from .activations.lrelu import ActLReLU
 from .activations.relu import ActReLU
 from .activations.sigmoid import ActSigmoid
+from .activations.softmax import ActSoftmax
 from .activations.tanh import ActTanh
 
 from .layers.base_layer import Layer
